@@ -3,11 +3,35 @@
 package stroke
 
 import (
+	"math"
 	"strconv"
 	"testing"
 
 	"gioui.org/internal/f32"
 )
+
+func TestAngleBetweenWraparound(t *testing.T) {
+	negativeZero := float32(math.Copysign(0, -1))
+	offset := float32(0.01)
+	want := math.Atan2(float64(offset), 1)
+
+	tests := []struct {
+		name   string
+		n0, n1 f32.Point
+		want   float64
+	}{
+		{"counter-clockwise", f32.Pt(-1, offset), f32.Pt(-1, negativeZero), want},
+		{"clockwise", f32.Pt(-1, negativeZero), f32.Pt(-1, offset), -want},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := angleBetween(test.n0, test.n1)
+			if diff := math.Abs(got - test.want); diff > 1e-7 {
+				t.Fatalf("angleBetween(%v, %v) = %v, want %v", test.n0, test.n1, got, test.want)
+			}
+		})
+	}
+}
 
 func TestNormPt(t *testing.T) {
 	type scenario struct {
@@ -152,7 +176,6 @@ func BenchmarkSplitCubic(b *testing.B) {
 	}
 
 	for _, s := range scenarios {
-		s := s
 		b.Run(strconv.Itoa(s.segments), func(b *testing.B) {
 			from, ctrl0, ctrl1, to := s.from, s.ctrl0, s.ctrl1, s.to
 			quads := make([]QuadSegment, s.segments)

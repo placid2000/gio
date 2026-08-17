@@ -1042,6 +1042,59 @@ func TestEditorSelectShortcuts(t *testing.T) {
 	}
 }
 
+func TestEditorSelect(t *testing.T) {
+	tFont := font.Font{}
+	tFontSize := unit.Sp(10)
+	tShaper := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
+	tEditor := &Editor{
+		SingleLine: false,
+		ReadOnly:   true,
+	}
+	lines := "abc abc abc def def def ghi ghi ghi"
+	tEditor.SetText(lines)
+
+	tRouter := new(input.Router)
+	gtx := layout.Context{
+		Ops:         new(op.Ops),
+		Locale:      english,
+		Constraints: layout.Exact(image.Pt(50, 100)),
+		Source:      tRouter.Source(),
+	}
+	gtx.Execute(key.FocusCmd{Tag: tEditor})
+	tEditor.Layout(gtx, tShaper, tFont, tFontSize, op.CallOp{}, op.CallOp{})
+
+	index := tEditor.text.index
+
+	firstLineGlyphs := index.lines[0].glyphs
+	firstLine := lines[:firstLineGlyphs]
+	yOffFirstLineCenter := index.lines[0].yOff / 2
+
+	tEditor.ClearSelection()
+	tEditor.text.MoveCoord(image.Pt(100, yOffFirstLineCenter))
+	if cStart, cEnd := tEditor.Selection(); cStart != len(firstLine) || cEnd != 0 {
+		t.Errorf("TestEditorSelect %d: initial selection", len(firstLine))
+	}
+	if got := tEditor.SelectedText(); got != firstLine {
+		t.Errorf("TestEditorSelect : Expected %q, got %q", firstLine, got)
+	}
+
+	yOffSecondLineCenter := (index.lines[1].yOff-index.lines[0].yOff)/2 + index.lines[0].yOff
+	tEditor.text.MoveCoord(image.Pt(100, yOffSecondLineCenter))
+
+	secondLineGlyphs := index.lines[1].glyphs
+	firstTwoLines := lines[:firstLineGlyphs+secondLineGlyphs]
+	if got := tEditor.SelectedText(); got != firstTwoLines {
+		t.Errorf("TestEditorSelect : Expected %q, got %q", firstTwoLines, got)
+	}
+
+	tEditor.Layout(gtx, tShaper, tFont, tFontSize, op.CallOp{}, op.CallOp{})
+	firstLineEnd := index.lines[0].width.Round()
+	firstRegionMaxWidth := tEditor.text.regions[0].Bounds.Max.X
+	if firstRegionMaxWidth != firstLineEnd {
+		t.Errorf("Selection paint should contain last character")
+	}
+}
+
 // Verify that an existing selection is dismissed when you press arrow keys.
 func TestSelectMove(t *testing.T) {
 	e := new(Editor)
@@ -1087,6 +1140,42 @@ func TestSelectMove(t *testing.T) {
 			t.Errorf("KeyName %s, expected %q, got %q", keyName, expected, got)
 		}
 	}
+}
+
+func TestEditorIMEStateInvalidation(t *testing.T) {
+	e := new(Editor)
+	e.SingleLine = true
+	e.SetText("hello world")
+	e.ime.composition = key.Range{Start: 0, End: 5}
+	gtx := layout.Context{
+		Ops:         new(op.Ops),
+		Constraints: layout.Exact(image.Pt(50, 20)),
+		Locale:      english,
+	}
+	shaper := text.NewShaper(text.NoSystemFonts(), text.WithCollection(gofont.Collection()))
+	e.Layout(gtx, shaper, font.Font{}, unit.Sp(10), op.CallOp{}, op.CallOp{})
+
+	e.text.regions = nil
+	e.updateIMEState(gtx)
+	if len(e.text.regions) != 0 {
+		t.Fatal("unchanged IME state traversed text regions")
+	}
+
+	check := func(name string, change func()) {
+		e.text.regions = nil
+		change()
+		e.updateIMEState(gtx)
+		if len(e.text.regions) == 0 {
+			t.Fatalf("%s: changed IME state did not traverse text regions", name)
+		}
+	}
+	check("selection", func() { e.SetCaret(1, 1) })
+	check("content", func() { e.text.Replace(0, 1, "H") })
+	check("scroll", func() { e.text.ScrollRel(10, 0) })
+	check("constraints", func() {
+		gtx.Constraints = layout.Exact(image.Pt(40, 20))
+		e.Layout(gtx, shaper, font.Font{}, unit.Sp(10), op.CallOp{}, op.CallOp{})
+	})
 }
 
 func TestEditor_Read(t *testing.T) {

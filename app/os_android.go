@@ -162,7 +162,6 @@ type window struct {
 	insets    pixelInsets
 
 	visible   bool
-	focused   bool
 	started   bool
 	animating bool
 
@@ -527,9 +526,8 @@ func Java_org_gioui_GioView_onStopView(env *C.JNIEnv, class C.jclass, handle C.j
 	w := cgo.Handle(handle).Value().(*window)
 	w.started = false
 	w.visible = false
-	w.focused = false
 
-	w.sendConfigEvent()
+	w.focused = false
 }
 
 //export Java_org_gioui_GioView_onStartView
@@ -548,7 +546,6 @@ func Java_org_gioui_GioView_onSurfaceDestroyed(env *C.JNIEnv, class C.jclass, ha
 	w := cgo.Handle(handle).Value().(*window)
 	w.win = nil
 	w.visible = false
-	w.sendConfigEvent()
 }
 
 //export Java_org_gioui_GioView_onSurfaceChanged
@@ -594,8 +591,8 @@ func Java_org_gioui_GioView_onBack(env *C.JNIEnv, class C.jclass, view C.jlong) 
 //export Java_org_gioui_GioView_onFocusChange
 func Java_org_gioui_GioView_onFocusChange(env *C.JNIEnv, class C.jclass, view C.jlong, focus C.jboolean) {
 	w := cgo.Handle(view).Value().(*window)
-	w.focused = focus == C.JNI_TRUE
-	w.sendConfigEvent()
+	w.config.Focused = focus == C.JNI_TRUE
+	w.processEvent(ConfigEvent{Config: w.config})
 }
 
 //export Java_org_gioui_GioView_onWindowInsets
@@ -821,13 +818,7 @@ func (w *window) setVisible(env *C.JNIEnv) {
 		return
 	}
 	w.visible = true
-	w.sendConfigEvent()
 	w.draw(env, true)
-}
-
-func (w *window) sendConfigEvent() {
-	w.config.Focused = w.visible && w.focused
-	w.processEvent(ConfigEvent{Config: w.config})
 }
 
 func (w *window) setVisual(visID int) error {
@@ -872,7 +863,7 @@ func (w *window) draw(env *C.JNIEnv, sync bool) {
 	size := image.Pt(int(C.ANativeWindow_getWidth(w.win)), int(C.ANativeWindow_getHeight(w.win)))
 	if size != w.config.Size {
 		w.config.Size = size
-		w.sendConfigEvent()
+		w.processEvent(ConfigEvent{Config: w.config})
 	}
 	if size.X == 0 || size.Y == 0 {
 		return
@@ -1244,18 +1235,12 @@ func javaBool(b bool) C.jboolean {
 
 func javaString(env *C.JNIEnv, str string) C.jstring {
 	utf16Chars := utf16.Encode([]rune(str))
-	var ptr *C.jchar
-	if len(utf16Chars) > 0 {
-		ptr = (*C.jchar)(unsafe.Pointer(&utf16Chars[0]))
-	}
+	ptr := (*C.jchar)(unsafe.Pointer(unsafe.SliceData(utf16Chars)))
 	return C.jni_NewString(env, ptr, C.int(len(utf16Chars)))
 }
 
 func varArgs(args []jvalue) *C.jvalue {
-	if len(args) == 0 {
-		return nil
-	}
-	return (*C.jvalue)(unsafe.Pointer(&args[0]))
+	return (*C.jvalue)(unsafe.Pointer(unsafe.SliceData(args)))
 }
 
 func callStaticVoidMethod(env *C.JNIEnv, cls C.jclass, method C.jmethodID, args ...jvalue) error {
@@ -1408,7 +1393,7 @@ func (w *window) setConfig(env *C.JNIEnv, cnf Config) {
 	if cnf.Decorated != prev.Decorated {
 		w.config.Decorated = cnf.Decorated
 	}
-	w.sendConfigEvent()
+	w.processEvent(ConfigEvent{Config: w.config})
 }
 
 func (w *window) Perform(system.Action) {}

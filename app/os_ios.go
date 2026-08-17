@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Unlicense OR MIT
 
-//go:build darwin && ios
-// +build darwin,ios
-
 package app
 
 /*
@@ -308,10 +305,7 @@ func (w *window) ReadClipboard() {
 
 func (w *window) WriteClipboard(mime string, s []byte) {
 	u16 := utf16.Encode([]rune(string(s)))
-	var chars *C.unichar
-	if len(u16) > 0 {
-		chars = (*C.unichar)(unsafe.Pointer(&u16[0]))
-	}
+	chars := (*C.unichar)(unsafe.Pointer(unsafe.SliceData(u16)))
 	C.writeClipboard(chars, C.NSUInteger(len(u16)))
 }
 

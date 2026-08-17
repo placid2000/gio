@@ -109,7 +109,12 @@ const (
 type SemanticID uint
 
 // SystemEvent is a marker for events that have platform specific
-// side-effects. SystemEvents are never matched by catch-all filters.
+// side-effects. SystemEvents are never matched by catch-all filters;
+// only filters that explicitly match the event, such as a
+// [gioui.org/io/key.Filter] with a non-empty Name, receive them.
+// [gioui.org/app.Window] uses SystemEvent for keys reserved for focus
+// navigation: Tab and Shift-Tab, and on mobile the arrow keys. If no
+// handler matches such an event, the window moves focus instead.
 type SystemEvent struct {
 	Event event.Event
 }
@@ -419,7 +424,7 @@ func (f *filter) Merge(f2 filter) {
 
 func (f *filter) Matches(e event.Event) bool {
 	switch e.(type) {
-	case key.FocusEvent, key.SnippetEvent, key.EditEvent, key.SelectionEvent:
+	case key.FocusEvent, key.SnippetEvent, key.EditEvent, key.SelectionEvent, key.CompositionEvent:
 		return f.focusable
 	default:
 		return f.pointer.Matches(e)
@@ -458,6 +463,13 @@ func (q *Router) processEvent(e event.Event, system bool) {
 				e.End = r.End
 			}
 		}
+		var evts []taggedEvent
+		if f := state.focus; f != nil {
+			evts = append(evts, taggedEvent{tag: f, event: e})
+		}
+		q.changeState(e, state, evts)
+	case key.CompositionEvent:
+		e = key.CompositionEvent(rangeNorm(key.Range(e)))
 		var evts []taggedEvent
 		if f := state.focus; f != nil {
 			evts = append(evts, taggedEvent{tag: f, event: e})

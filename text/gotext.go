@@ -103,8 +103,7 @@ func (l *line) insertTrailingSyntheticNewline(newLineClusterIdx int) {
 		clusterIndex: newLineClusterIdx,
 		glyphCount:   0,
 		runeCount:    1,
-		xAdvance:     0,
-		yAdvance:     0,
+		advance:      0,
 		xOffset:      0,
 		yOffset:      0,
 	}
@@ -160,9 +159,9 @@ type glyph struct {
 	// runeCount is the quantity of runes in the source text that this glyph
 	// corresponds to.
 	runeCount int
-	// xAdvance and yAdvance describe the distance the dot moves when
-	// laying out the glyph on the X or Y axis.
-	xAdvance, yAdvance fixed.Int26_6
+	// advance is the distance the dot moves when laying out the glyph along
+	// the run's primary axis.
+	advance fixed.Int26_6
 	// xOffset and yOffset describe offsets from the dot that should be
 	// applied when rendering the glyph.
 	xOffset, yOffset fixed.Int26_6
@@ -270,8 +269,9 @@ func newShaperImpl(systemFonts bool, collection []FontFace) *shaperImpl {
 // in the order in which they are loaded, with the first face being the default.
 func (s *shaperImpl) Load(f FontFace) {
 	desc := opentype.FontToDescription(f.Font)
-	s.fontMap.AddFace(f.Face.Face(), fontscan.Location{File: fmt.Sprint(desc)}, desc)
-	s.addFace(f.Face.Face(), f.Font)
+	face := f.Face.Face()
+	s.fontMap.AddFace(face, fontscan.Location{File: fmt.Sprint(desc)}, desc)
+	s.addFace(face, f.Font)
 }
 
 func (s *shaperImpl) addFace(f *font.Face, md giofont.Font) {
@@ -312,7 +312,7 @@ func splitByScript(inputs []shaping.Input, documentDir di.Direction, buf []shapi
 			r := input.Text[i]
 			runeScript := language.LookupScript(r)
 
-			if runeScript == language.Common || runeScript == currentInput.Script {
+			if runeScript == language.Common || runeScript == language.Inherited || runeScript == currentInput.Script {
 				continue
 			}
 
@@ -437,8 +437,7 @@ func (s *shaperImpl) shapeText(ppem fixed.Int26_6, lc system.Locale, txt []rune)
 						Height:       input.Size,
 						XBearing:     0,
 						YBearing:     0,
-						XAdvance:     input.Size,
-						YAdvance:     input.Size,
+						Advance:      input.Size,
 						XOffset:      0,
 						YOffset:      0,
 						ClusterIndex: input.RunStart,
@@ -656,53 +655,60 @@ func (s *shaperImpl) Shape(pathOps *op.Ops, gs []Glyph) clip.PathSpec {
 		}
 		scaleFactor := fixedToFloat(ppem) / float32(face.Upem())
 		glyphData := face.GlyphData(gid)
+
+		var outline font.GlyphOutline
 		switch glyphData := glyphData.(type) {
 		case font.GlyphOutline:
-			outline := glyphData
-			// Move to glyph position.
-			pos := f32.Point{
-				X: fixedToFloat((g.X - x) - g.Offset.X),
-				Y: -fixedToFloat(g.Offset.Y),
-			}
-			builder.Move(pos.Sub(lastPos))
-			lastPos = pos
-			var lastArg f32.Point
-
-			// Convert fonts.Segments to relative segments.
-			for _, fseg := range outline.Segments {
-				nargs := 1
-				switch fseg.Op {
-				case gotextot.SegmentOpQuadTo:
-					nargs = 2
-				case gotextot.SegmentOpCubeTo:
-					nargs = 3
-				}
-				var args [3]f32.Point
-				for i := range nargs {
-					a := f32.Point{
-						X: fseg.Args[i].X * scaleFactor,
-						Y: -fseg.Args[i].Y * scaleFactor,
-					}
-					args[i] = a.Sub(lastArg)
-					if i == nargs-1 {
-						lastArg = a
-					}
-				}
-				switch fseg.Op {
-				case gotextot.SegmentOpMoveTo:
-					builder.Move(args[0])
-				case gotextot.SegmentOpLineTo:
-					builder.Line(args[0])
-				case gotextot.SegmentOpQuadTo:
-					builder.Quad(args[0], args[1])
-				case gotextot.SegmentOpCubeTo:
-					builder.Cube(args[0], args[1], args[2])
-				default:
-					panic("unsupported segment op")
-				}
-			}
-			lastPos = lastPos.Add(lastArg)
+			outline = glyphData
+		case font.GlyphSVG:
+			outline = glyphData.Outline
+		default:
+			continue
 		}
+
+		// Move to glyph position.
+		pos := f32.Point{
+			X: fixedToFloat((g.X - x) - g.Offset.X),
+			Y: -fixedToFloat(g.Offset.Y),
+		}
+		builder.Move(pos.Sub(lastPos))
+		lastPos = pos
+		var lastArg f32.Point
+
+		// Convert fonts.Segments to relative segments.
+		for _, fseg := range outline.Segments {
+			nargs := 1
+			switch fseg.Op {
+			case gotextot.SegmentOpQuadTo:
+				nargs = 2
+			case gotextot.SegmentOpCubeTo:
+				nargs = 3
+			}
+			var args [3]f32.Point
+			for i := range nargs {
+				a := f32.Point{
+					X: fseg.Args[i].X * scaleFactor,
+					Y: -fseg.Args[i].Y * scaleFactor,
+				}
+				args[i] = a.Sub(lastArg)
+				if i == nargs-1 {
+					lastArg = a
+				}
+			}
+			switch fseg.Op {
+			case gotextot.SegmentOpMoveTo:
+				builder.Move(args[0])
+			case gotextot.SegmentOpLineTo:
+				builder.Line(args[0])
+			case gotextot.SegmentOpQuadTo:
+				builder.Quad(args[0], args[1])
+			case gotextot.SegmentOpCubeTo:
+				builder.Cube(args[0], args[1], args[2])
+			default:
+				panic("unsupported segment op")
+			}
+		}
+		lastPos = lastPos.Add(lastArg)
 	}
 	return builder.End()
 }
@@ -761,7 +767,7 @@ func (s *shaperImpl) Bitmaps(ops *op.Ops, gs []Glyph) op.CallOp {
 				imgSize = bitmapData.size
 			}
 			off := op.Affine(f32.AffineId().Offset(f32.Point{
-				X: fixedToFloat((g.X - x) - g.Offset.X),
+				X: fixedToFloat((g.X - x) + g.Offset.X),
 				Y: fixedToFloat(g.Offset.Y + g.Bounds.Min.Y),
 			})).Push(ops)
 			cl := clip.Rect{Max: imgSize}.Push(ops)
@@ -847,11 +853,10 @@ func toGioGlyphs(in []shaping.Glyph, ppem fixed.Int26_6, faceIdx int) []glyph {
 		bounds.Max = bounds.Min.Add(fixed.Point26_6{X: g.Width, Y: -g.Height})
 		out = append(out, glyph{
 			id:           newGlyphID(ppem, faceIdx, g.GlyphID),
-			clusterIndex: g.ClusterIndex,
-			runeCount:    g.RuneCount,
-			glyphCount:   g.GlyphCount,
-			xAdvance:     g.XAdvance,
-			yAdvance:     g.YAdvance,
+			clusterIndex: g.TextIndex(),
+			runeCount:    g.RunesCount(),
+			glyphCount:   g.GlyphsCount(),
+			advance:      g.Advance,
 			xOffset:      g.XOffset,
 			yOffset:      g.YOffset,
 			bounds:       bounds,

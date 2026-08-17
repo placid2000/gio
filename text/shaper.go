@@ -259,10 +259,6 @@ func WithCollection(collection []FontFace) ShaperOption {
 }
 
 // NewShaper constructs a shaper with the provided options.
-//
-// NewShaper must be called after [app.NewWindow], unless the [NoSystemFonts]
-// option is specified. This is an unfortunate restriction caused by some platforms
-// such as Android.
 func NewShaper(options ...ShaperOption) *Shaper {
 	l := &Shaper{}
 	for _, opt := range options {
@@ -468,7 +464,7 @@ func (l *Shaper) NextGlyph() (_ Glyph, ok bool) {
 		if rtl {
 			// Modify the advance prior to computing runOffset to ensure that the
 			// current glyph's width is subtracted in RTL.
-			l.advance += g.xAdvance
+			l.advance += g.advance
 		}
 		// runOffset computes how far into the run the dot should be positioned.
 		runOffset := l.advance
@@ -481,7 +477,7 @@ func (l *Shaper) NextGlyph() (_ Glyph, ok bool) {
 			Y:       int32(line.yOffset),
 			Ascent:  line.ascent,
 			Descent: line.descent,
-			Advance: g.xAdvance,
+			Advance: g.advance,
 			Runes:   uint16(g.runeCount),
 			Offset: fixed.Point26_6{
 				X: g.xOffset,
@@ -494,7 +490,7 @@ func (l *Shaper) NextGlyph() (_ Glyph, ok bool) {
 		}
 		l.glyph++
 		if !rtl {
-			l.advance += g.xAdvance
+			l.advance += g.advance
 		}
 
 		endOfRun := l.glyph == len(run.Glyphs)
