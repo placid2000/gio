@@ -526,15 +526,12 @@ func Java_org_gioui_GioView_onStopView(env *C.JNIEnv, class C.jclass, handle C.j
 	w := cgo.Handle(handle).Value().(*window)
 	w.started = false
 	w.visible = false
-
-	w.focused = false
 }
 
 //export Java_org_gioui_GioView_onStartView
 func Java_org_gioui_GioView_onStartView(env *C.JNIEnv, class C.jclass, handle C.jlong) {
 	w := cgo.Handle(handle).Value().(*window)
 	w.started = true
-	w.focused = true
 
 	if w.win != nil {
 		w.setVisible(env)

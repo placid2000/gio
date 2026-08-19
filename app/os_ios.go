@@ -196,17 +196,13 @@ func (w *window) draw(sync bool) {
 func onStop(h C.uintptr_t) {
 	w := viewFor(h)
 	w.hidden = true
-	w.config.Focused = false
-	w.ProcessEvent(ConfigEvent{Config: w.config})
 }
 
 //export onStart
 func onStart(h C.uintptr_t) {
 	w := viewFor(h)
 	w.hidden = false
-	w.config.Focused = true
 	w.draw(true)
-	w.ProcessEvent(ConfigEvent{Config: w.config})
 }
 
 //export onDestroy
